@@ -266,6 +266,9 @@ sjson_node* sjson_put_string(sjson_context* ctx, sjson_node* parent, const char*
 sjson_node* sjson_put_floats(sjson_context* ctx, sjson_node* parent, const char* key, const float* vals, int count);
 sjson_node* sjson_put_ints(sjson_context* ctx, sjson_node* parent, const char* key, const int* vals, int count);
 sjson_node* sjson_put_strings(sjson_context* ctx, sjson_node* parent, const char* key, const char** vals, int count);
+sjson_node* sjson_put_uints(sjson_context* ctx, sjson_node* parent, const char* key, const uint32_t* vals, int count);
+sjson_node* sjson_put_int16s(sjson_context* ctx, sjson_node* parent, const char* key, const int16_t* vals, int count);
+sjson_node* sjson_put_uint16s(sjson_context* ctx, sjson_node* parent, const char* key, const uint16_t* vals, int count);
 
 // Debugging
 
@@ -1479,6 +1482,45 @@ sjson_node* sjson_put_floats(sjson_context* ctx, sjson_node* parent, const char*
 }
 
 sjson_node* sjson_put_ints(sjson_context* ctx, sjson_node* parent, const char* key, const int* vals, int count)
+{
+    sjson_node* a = sjson_mkarray(ctx);
+    sjson_assert(a);
+    for (int i = 0; i < count; i++) {
+        sjson_node* n = sjson_mknumber(ctx, (double)vals[i]);
+        sjson_assert(n);
+        sjson_append_element(a, n);
+    }
+    sjson_append_member(ctx, parent, key, a);
+    return a;
+}
+
+sjson_node* sjson_put_uints(sjson_context* ctx, sjson_node* parent, const char* key, const uint32_t* vals, int count)
+{
+    sjson_node* a = sjson_mkarray(ctx);
+    sjson_assert(a);
+    for (int i = 0; i < count; i++) {
+        sjson_node* n = sjson_mknumber(ctx, (double)vals[i]);
+        sjson_assert(n);
+        sjson_append_element(a, n);
+    }
+    sjson_append_member(ctx, parent, key, a);
+    return a;
+}
+
+sjson_node* sjson_put_int16s(sjson_context* ctx, sjson_node* parent, const char* key, const int16_t* vals, int count)
+{
+    sjson_node* a = sjson_mkarray(ctx);
+    sjson_assert(a);
+    for (int i = 0; i < count; i++) {
+        sjson_node* n = sjson_mknumber(ctx, (double)vals[i]);
+        sjson_assert(n);
+        sjson_append_element(a, n);
+    }
+    sjson_append_member(ctx, parent, key, a);
+    return a;
+}
+
+sjson_node* sjson_put_uint16s(sjson_context* ctx, sjson_node* parent, const char* key, const uint16_t* vals, int count)
 {
     sjson_node* a = sjson_mkarray(ctx);
     sjson_assert(a);

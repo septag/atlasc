@@ -359,7 +359,8 @@ static inline SX_CONSTFN float sx_ceil(float _f) {
 }
 
 static inline SX_CONSTFN float sx_lerp(float _a, float _b, float _t) {
-    return _a + (_b - _a) * _t;
+    // this version is more precise than: _a + (_b - _a) * _t
+    return (1.0f - _t)*_a + _t*_b;
 }
 
 static inline SX_CONSTFN float sx_sign(float _a) {

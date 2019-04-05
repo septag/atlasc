@@ -1,6 +1,12 @@
+//
+// Copyright 2019 Sepehr Taghdisian (septag@github). All rights reserved.
+// License: https://github.com/septag/atlasc#license-bsd-2-clause
+//
+
 #include "sx/allocator.h"
 #include "sx/array.h"
 #include "sx/cmdline.h"
+#include "sx/io.h"
 #include "sx/math.h"
 #include "sx/os.h"
 #include "sx/string.h"
@@ -47,20 +53,31 @@ static const sx_alloc* g_alloc;
 #define VERSION 1000
 
 typedef struct atlasc_args {
-    int         threshold;
+    int         alpha_threshold;
+    float       dist_threshold;
     char**      in_filepaths;
     int         num_inputs;
     const char* out_filepath;
     int         max_width;
     int         max_height;
+    int         border;
+    int         pot;
+    int         padding;
+    int         mesh;
+    int         max_verts_per_mesh;
 } atlasc_args;
 
 typedef struct {
     uint8_t* src_image;
     sx_ivec2 src_size;
-    sx_irect cropped_rect;
+    sx_irect sprite_rect;
     sx_irect sheet_rect;
-    sx_rect  sheet_uv;
+
+    // sprite-mesh data (if set)
+    uint16_t  num_tris;
+    int       num_points;
+    sx_ivec2* pts;
+    uint16_t* tris;
 } atlasc__sprite;
 
 static char g_error_str[512];
@@ -82,6 +99,14 @@ static void atlasc__free_sprites(atlasc__sprite* sprites, int num_sprites) {
         if (sprites[i].src_image) {
             stbi_image_free(sprites[i].src_image);
         }
+
+        if (sprites[i].tris) {
+            sx_free(g_alloc, sprites[i].tris);
+        }
+
+        if (sprites[i].pts) {
+            sx_free(g_alloc, sprites[i].pts);
+        }
     }
     sx_free(g_alloc, sprites);
 }
@@ -99,6 +124,140 @@ static void atlasc__blit(uint8_t* dst, int dst_x, int dst_y, int dst_pitch, cons
         src_ptr += src_pitch;
         dst_ptr += dst_pitch;
     }
+}
+
+static void atlasc__triangulate(atlasc__sprite* spr, const s2o_point* pts, int pt_count,
+                                int max_verts) {
+    const float delta = 0.5f;
+    const float threshold_start = 0.5f;
+
+    float      threshold = threshold_start;
+    int        num_verts;
+    s2o_point* temp_pts = sx_malloc(g_alloc, sizeof(s2o_point) * pt_count);
+    if (!temp_pts) {
+        sx_out_of_memory();
+        return;
+    }
+
+    do {
+        num_verts = pt_count;
+        sx_memcpy(temp_pts, pts, num_verts * sizeof(s2o_point));
+        s2o_distance_based_path_simplification(temp_pts, &num_verts, threshold);
+        threshold += delta;
+    } while (num_verts > max_verts);
+    //printf("threshold: %.2f\n", threshold);
+
+    // triangulate
+    del_point2d_t* dpts = sx_malloc(g_alloc, sizeof(del_point2d_t) * num_verts);
+    if (!dpts) {
+        sx_out_of_memory();
+        return;
+    }
+    for (int i = 0; i < num_verts; i++) {
+        dpts[i].x = (double)temp_pts[i].x;
+        dpts[i].y = (double)temp_pts[i].y;
+    }
+
+    delaunay2d_t* polys = delaunay2d_from(dpts, num_verts);
+    sx_assert(polys);
+    tri_delaunay2d_t* tris = tri_delaunay2d_from(polys);
+    sx_assert(tris);
+    sx_free(g_alloc, dpts);
+    delaunay2d_release(polys);
+
+    sx_assert(tris->num_triangles < UINT16_MAX);
+    spr->tris = sx_malloc(g_alloc, sizeof(uint16_t) * tris->num_triangles * 3);
+    spr->pts = sx_malloc(g_alloc, sizeof(sx_ivec2) * tris->num_points);
+    sx_assert(spr->tris);
+    sx_assert(spr->pts);
+
+    for (unsigned int i = 0; i < tris->num_triangles; i++) {
+        unsigned int index = i * 3;
+        spr->tris[index] = (uint16_t)tris->tris[index];
+        spr->tris[index + 1] = (uint16_t)tris->tris[index + 1];
+        spr->tris[index + 2] = (uint16_t)tris->tris[index + 2];
+    }
+    for (unsigned int i = 0; i < tris->num_points; i++) {
+        spr->pts[i] = sx_ivec2i((int)tris->points[i].x, (int)tris->points[i].y);
+    }
+    spr->num_tris = (uint16_t)tris->num_triangles;
+    spr->num_points = (int)tris->num_points;
+
+    tri_delaunay2d_release(tris);
+    sx_free(g_alloc, temp_pts);
+}
+
+static bool atlasc__save(const atlasc_args* args, const atlasc__sprite* sprites, int num_sprites,
+                         const uint8_t* dst, int dst_w, int dst_h) {
+    char file_ext[32];
+    char basename[256];
+    char image_filepath[256];
+    char image_filename[256];
+
+    sx_os_path_splitext(file_ext, sizeof(file_ext), basename, sizeof(basename), args->out_filepath);
+    sx_strcpy(image_filepath, sizeof(image_filepath), basename);
+    sx_strcat(image_filepath, sizeof(image_filepath), ".png");
+
+    if (!stbi_write_png(image_filepath, dst_w, dst_h, 4, dst, dst_w * 4)) {
+        printf("could not write image: %s\n", image_filepath);
+    }
+    sx_os_path_basename(image_filename, sizeof(image_filename), image_filepath);
+
+    // write atlas description into json file
+    sjson_context* jctx = sjson_create_context(0, 0, (void*)g_alloc);
+    if (!jctx) {
+        sx_assert(0);
+        return false;
+    }
+
+    sjson_node* jroot = sjson_mkobject(jctx);
+    sjson_put_string(jctx, jroot, "image", image_filename);
+    sjson_put_int(jctx, jroot, "image_width", dst_w);
+    sjson_put_int(jctx, jroot, "image_height", dst_h);
+
+    sjson_node* jsprites = sjson_put_array(jctx, jroot, "sprites");
+    char        name[256];
+    for (int i = 0; i < num_sprites; i++) {
+        const atlasc__sprite* spr = &sprites[i];
+        sjson_node*           jsprite = sjson_mkobject(jctx);
+
+        sx_os_path_unixpath(name, sizeof(name), args->in_filepaths[i]);
+        sjson_put_string(jctx, jsprite, "name", name);
+        sjson_put_ints(jctx, jsprite, "size", spr->src_size.n, 2);
+        sjson_put_ints(jctx, jsprite, "sprite_rect", spr->sprite_rect.f, 4);
+        sjson_put_ints(jctx, jsprite, "sheet_rect", spr->sheet_rect.f, 4);
+
+        if (spr->num_tris) {
+            sjson_node* jmesh = sjson_put_obj(jctx, jsprite, "mesh");
+            sjson_put_int(jctx, jmesh, "num_tris", spr->num_tris);
+            sjson_put_int(jctx, jmesh, "num_vertices", spr->num_points);
+            sjson_put_int16s(jctx, jmesh, "indices", spr->tris, spr->num_tris * 3);
+            sjson_node* jverts = sjson_put_array(jctx, jmesh, "vertices");
+            for (int v = 0; v < spr->num_points; v++) {
+                sjson_node* jvert = sjson_mkarray(jctx);
+                sjson_append_element(jvert, sjson_mknumber(jctx, (double)spr->pts[v].x));
+                sjson_append_element(jvert, sjson_mknumber(jctx, (double)spr->pts[v].y));
+                sjson_append_element(jverts, jvert);
+            }
+        }
+
+        sjson_append_element(jsprites, jsprite);
+    }
+
+    char* jout = sjson_encode(jctx, jroot);
+    if (!jout)
+        return false;
+    sx_file_writer writer;
+    if (!sx_file_open_writer(&writer, args->out_filepath, 0)) {
+        printf("could not open file for writing: %s\n", args->out_filepath);
+        return false;
+    }
+    sx_file_write_text(&writer, jout);
+    sx_file_close_writer(&writer);
+
+    sjson_free_string(jctx, jout);
+    sjson_destroy_context(jctx);
+    return true;
 }
 
 static bool atlasc_make(const atlasc_args* args) {
@@ -131,16 +290,19 @@ static bool atlasc_make(const atlasc_args* args) {
         }
         spr->src_image = pixels;
 
+        sx_irect sprite_rect;
         uint8_t* alpha = s2o_rgba_to_alpha(spr->src_image, spr->src_size.x, spr->src_size.y);
-        uint8_t* thresholded =
-            s2o_alpha_to_thresholded(alpha, spr->src_size.x, spr->src_size.y, args->threshold);
+        uint8_t* thresholded = s2o_alpha_to_thresholded(alpha, spr->src_size.x, spr->src_size.y,
+                                                        args->alpha_threshold);
         sx_free(g_alloc, alpha);
         uint8_t* outlined =
             s2o_thresholded_to_outlined(thresholded, spr->src_size.x, spr->src_size.y);
+#if 0
         char tmp_file[256];
         sx_strcpy(tmp_file, sizeof(tmp_file), args->in_filepaths[i]);
         sx_strcat(tmp_file, sizeof(tmp_file), ".bmp");
-        //stbi_write_bmp(tmp_file, spr->src_size.x, spr->src_size.y, 1, outlined);
+        stbi_write_bmp(tmp_file, spr->src_size.x, spr->src_size.y, 1, outlined);
+#endif
         sx_free(g_alloc, thresholded);
 
         int        pt_count;
@@ -149,12 +311,18 @@ static bool atlasc_make(const atlasc_args* args) {
         sx_free(g_alloc, outlined);
 
         // calculate cropped rectangle
-        sx_irect cropped = { .xmin = INT_MAX, .ymin = INT_MAX, .xmax = INT_MIN, .ymax = INT_MIN };
+        sprite_rect = sx_irecti(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
         for (int k = 0; k < pt_count; k++) {
-            sx_irect_add_point(&cropped, sx_ivec2i(pts[k].x, pts[k].y));
+            sx_irect_add_point(&sprite_rect, sx_ivec2i(pts[k].x, pts[k].y));
         }
-        spr->cropped_rect = cropped;
+
+        // generate mesh if set in arguments
+        if (args->mesh) {
+            atlasc__triangulate(spr, pts, pt_count, args->max_verts_per_mesh);
+        }
+
         sx_free(g_alloc, pts);
+        spr->sprite_rect = sprite_rect;
     }
 
     // pack sprites into a sheet
@@ -171,31 +339,39 @@ static bool atlasc_make(const atlasc_args* args) {
     sx_memset(rp_rects, 0x0, sizeof(stbrp_rect) * num_sprites);
 
     for (int i = 0; i < num_sprites; i++) {
-        sx_irect rc = sprites[i].cropped_rect;
-        rp_rects[i].w = rc.xmax - rc.xmin;
-        rp_rects[i].h = rc.ymax - rc.ymin;
+        sx_irect rc = sprites[i].sprite_rect;
+        int      rc_resize = (args->border + args->padding) * 2;
+        rp_rects[i].w = (rc.xmax - rc.xmin) + rc_resize;
+        rp_rects[i].h = (rc.ymax - rc.ymin) + rc_resize;
     }
     stbrp_init_target(&rp_ctx, max_width, max_height, rp_nodes, num_rp_nodes);
     sx_irect final_rect = sx_irecti(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
     if (stbrp_pack_rects(&rp_ctx, rp_rects, num_sprites)) {
         for (int i = 0; i < num_sprites; i++) {
-            sprites[i].sheet_rect =
+            sx_irect sheet_rect =
                 sx_irectwh(rp_rects[i].x, rp_rects[i].y, rp_rects[i].w, rp_rects[i].h);
-            printf("%s: %d %d %d %d\n", args->in_filepaths[i], sprites[i].sheet_rect.xmin,
-                   sprites[i].sheet_rect.ymin, 
-                   sprites[i].sheet_rect.xmax - sprites[i].sheet_rect.xmin,
-                   sprites[i].sheet_rect.ymax - sprites[i].sheet_rect.ymin);
-            sx_irect_add_point(&final_rect, sprites[i].sheet_rect.vmin);
-            sx_irect_add_point(&final_rect, sprites[i].sheet_rect.vmax);
+
+            // calculate the total size of output image
+            sx_irect_add_point(&final_rect, sheet_rect.vmin);
+            sx_irect_add_point(&final_rect, sheet_rect.vmax);
+
+            // shrink back rect and set the real sheet_rect for the sprite
+            sprites[i].sheet_rect =
+                sx_irect_expand(sheet_rect, sx_ivec2i(-args->border, -args->border));
         }
     }
 
-    printf("final: %d %d %d %d\n", final_rect.xmin, final_rect.ymin, final_rect.xmax,
-           final_rect.ymax);
-    int      dst_w = final_rect.xmax - final_rect.xmin;
-    int      dst_h = final_rect.ymax - final_rect.ymin;
-    //int      dst_w = 1024;
-    //int      dst_h = 1024;
+    int dst_w = final_rect.xmax - final_rect.xmin;
+    int dst_h = final_rect.ymax - final_rect.ymin;
+    // make output size divide by 4 by default
+    dst_w = sx_align_mask(dst_w, 3);
+    dst_h = sx_align_mask(dst_h, 3);
+
+    if (args->pot) {
+        dst_w = sx_nearest_pow2(dst_w);
+        dst_h = sx_nearest_pow2(dst_h);
+    }
+
     uint8_t* dst = sx_malloc(g_alloc, dst_w * dst_h * 4);
     sx_memset(dst, 0x0, dst_w * dst_h * 4);
     if (!dst) {
@@ -205,19 +381,23 @@ static bool atlasc_make(const atlasc_args* args) {
 
     for (int i = 0; i < num_sprites; i++) {
         const atlasc__sprite* spr = &sprites[i];
-        sx_irect              dstrc = spr->sheet_rect;
-        sx_irect              srcrc = spr->cropped_rect;
+
+        // remove padding and blit from src_image to dst
+        sx_irect dstrc =
+            sx_irect_expand(spr->sheet_rect, sx_ivec2i(-args->padding, -args->padding));
+        sx_irect srcrc = spr->sprite_rect;
         atlasc__blit(dst, dstrc.xmin, dstrc.ymin, dst_w * 4, spr->src_image, srcrc.xmin, srcrc.ymin,
                      srcrc.xmax - srcrc.xmin, srcrc.ymax - srcrc.ymin, spr->src_size.x * 4, 32);
     }
 
-    stbi_write_png(args->out_filepath, dst_w, dst_h, 4, dst, dst_w * 4);
+    bool r = atlasc__save(args, sprites, num_sprites, dst, dst_w, dst_h);
 
     sx_free(g_alloc, rp_nodes);
     sx_free(g_alloc, rp_rects);
+    sx_free(g_alloc, dst);
     atlasc__free_sprites(sprites, num_sprites);
 
-    return true;
+    return r;
 }
 
 static const char* atlasc_error_string() {
@@ -233,19 +413,33 @@ int main(int argc, char* argv[]) {
     g_alloc = alloc;
 
     int         version = 0;
-    atlasc_args args = { .threshold = 1, .max_width = 1024, .max_height = 1024 };
+    atlasc_args args = { .alpha_threshold = 20,
+                         .max_width = 2048,
+                         .max_height = 2048,
+                         .border = 2,
+                         .padding = 1,
+                         .max_verts_per_mesh = 25 };
 
     const sx_cmdline_opt cmd_opts[] = {
         { "help", 'h', SX_CMDLINE_OPTYPE_NO_ARG, 0x0, 'h', "Print help text", 0x0 },
         { "version", 'V', SX_CMDLINE_OPTYPE_FLAG_SET, &version, 1, "Print version", 0x0 },
         { "input", 'i', SX_CMDLINE_OPTYPE_REQUIRED, 0x0, 'i', "Input image file(s)", "Filepath" },
-        { "threshold", 'T', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'T', "Alpha threshold (0..255)",
-          "Number" },
         { "output", 'o', SX_CMDLINE_OPTYPE_REQUIRED, 0x0, 'o', "Output file", "Filepath" },
-        { "max-width", 'W', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 1024, "Maximum output image width",
-          "Pixels" },
-        { "max-height", 'H', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 1024, "Maximum output image height",
-          "Pixels" },
+        { "max-width", 'W', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'W',
+          "Maximum output image width (default:1024)", "Pixels" },
+        { "max-height", 'H', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'H',
+          "Maximum output image height (default:1024)", "Pixels" },
+        { "border", 'B', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'B',
+          "Border size for each sprite (default:2)", "Pixels" },
+        { "pot", '2', SX_CMDLINE_OPTYPE_FLAG_SET, &args.pot, 1,
+          "Make output image size power-of-two", NULL },
+        { "padding", 'P', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'P',
+          "Set padding for each sprite (default:1)", "Pixels" },
+        { "mesh", 'm', SX_CMDLINE_OPTYPE_FLAG_SET, &args.mesh, 1, "Make sprite meshes", NULL },
+        { "max-verts", 'M', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'M',
+          "Set maximum vertices for each generated sprite mesh (default:25)", "Number" },
+        { "alpha-threshold", 'A', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'A',
+          "Alpha threshold for cropping (0..255)", "Number" },
         SX_CMDLINE_OPT_END
     };
 
@@ -264,9 +458,12 @@ int main(int argc, char* argv[]) {
         case '!': printf("Invalid use of argument: %s\n", arg); exit(-1); break;
         case 'i': sx_array_push(alloc, args.in_filepaths, (char*)arg); break;
         case 'o': args.out_filepath = arg; break;
-        case 'T': args.threshold = sx_toint(arg); break;
+        case 'A': args.alpha_threshold = sx_toint(arg); break;
         case 'W': args.max_width = sx_toint(arg); break;
         case 'H': args.max_height = sx_toint(arg); break;
+        case 'B': args.border = sx_toint(arg); break;
+        case 'P': args.padding = sx_toint(arg); break;
+        case 'M': args.max_verts_per_mesh = sx_toint(arg); break;
         default:  break;
         }
     }
@@ -277,14 +474,25 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (!args.in_filepaths) {
+        puts("must set at least one input file (-i)");
+        return -1;
+    }
+
+    if (!args.out_filepath) {
+        puts("must set output file (-o)");
+        return -1;
+    }
+
     for (int i = 0; i < sx_array_count(args.in_filepaths); i++) {
         if (!sx_os_path_isfile(args.in_filepaths[i])) {
             printf("Invalid file path: %s\n", args.in_filepaths[i]);
             return -1;
         }
     }
+
     args.num_inputs = sx_array_count(args.in_filepaths);
-    atlasc_make(&args);
+    bool r = atlasc_make(&args);
 
     sx_cmdline_destroy_context(cmd, alloc);
     sx_array_free(alloc, args.in_filepaths);
@@ -292,5 +500,5 @@ int main(int argc, char* argv[]) {
 #ifdef _DEBUG
     sx_dump_leaks(NULL);
 #endif
-    return 0;
+    return r ? 0 : -1;
 }

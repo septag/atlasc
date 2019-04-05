@@ -4,15 +4,12 @@
 [@septag](https://twitter.com/septagh)  
 
 _atlasc_ is a command-line program that builds atlas textures from a bunch of input images.  
-It can also be compiled as a static library which you can use it in your own toolsets.
 
 ## Features
-- Can be compiled as a command-line tool and static library
-- Light and fast
+- Light and fast.
 - Outputs atlas description to human-readable _json_ format. Generated images are _png_.
-- Outputs both atlas description and image to native IFF binary file format.
-- Supports zero-alpha trimming
-- Supports polygon sprites
+- Alpha trimming
+- Mesh sprites
 
 ## Build
 It has built and tested on the following platforms:
