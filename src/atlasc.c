@@ -77,6 +77,7 @@ typedef struct {
     uint16_t  num_tris;
     int       num_points;
     sx_ivec2* pts;
+    sx_ivec2* uvs;
     uint16_t* tris;
 } atlasc__sprite;
 
@@ -106,6 +107,10 @@ static void atlasc__free_sprites(atlasc__sprite* sprites, int num_sprites) {
 
         if (sprites[i].pts) {
             sx_free(g_alloc, sprites[i].pts);
+        }
+
+        if (sprites[i].uvs) {
+            sx_free(g_alloc, sprites[i].uvs);
         }
     }
     sx_free(g_alloc, sprites);
@@ -145,7 +150,7 @@ static void atlasc__triangulate(atlasc__sprite* spr, const s2o_point* pts, int p
         s2o_distance_based_path_simplification(temp_pts, &num_verts, threshold);
         threshold += delta;
     } while (num_verts > max_verts);
-    //printf("threshold: %.2f\n", threshold);
+    // printf("threshold: %.2f\n", threshold);
 
     // triangulate
     del_point2d_t* dpts = sx_malloc(g_alloc, sizeof(del_point2d_t) * num_verts);
@@ -232,12 +237,20 @@ static bool atlasc__save(const atlasc_args* args, const atlasc__sprite* sprites,
             sjson_put_int(jctx, jmesh, "num_tris", spr->num_tris);
             sjson_put_int(jctx, jmesh, "num_vertices", spr->num_points);
             sjson_put_int16s(jctx, jmesh, "indices", spr->tris, spr->num_tris * 3);
-            sjson_node* jverts = sjson_put_array(jctx, jmesh, "vertices");
+            sjson_node* jverts = sjson_put_array(jctx, jmesh, "positions");
             for (int v = 0; v < spr->num_points; v++) {
                 sjson_node* jvert = sjson_mkarray(jctx);
                 sjson_append_element(jvert, sjson_mknumber(jctx, (double)spr->pts[v].x));
                 sjson_append_element(jvert, sjson_mknumber(jctx, (double)spr->pts[v].y));
                 sjson_append_element(jverts, jvert);
+            }
+
+            sjson_node* juvs = sjson_put_array(jctx, jmesh, "uvs");
+            for (int u = 0; u < spr->num_points; u++) {
+                sjson_node* juv = sjson_mkarray(jctx);
+                sjson_append_element(juv, sjson_mknumber(jctx, (double)spr->uvs[u].x));
+                sjson_append_element(juv, sjson_mknumber(jctx, (double)spr->uvs[u].y));
+                sjson_append_element(juvs, juv);
             }
         }
 
@@ -297,12 +310,6 @@ static bool atlasc_make(const atlasc_args* args) {
         sx_free(g_alloc, alpha);
         uint8_t* outlined =
             s2o_thresholded_to_outlined(thresholded, spr->src_size.x, spr->src_size.y);
-#if 0
-        char tmp_file[256];
-        sx_strcpy(tmp_file, sizeof(tmp_file), args->in_filepaths[i]);
-        sx_strcat(tmp_file, sizeof(tmp_file), ".bmp");
-        stbi_write_bmp(tmp_file, spr->src_size.x, spr->src_size.y, 1, outlined);
-#endif
         sx_free(g_alloc, thresholded);
 
         int        pt_count;
@@ -348,7 +355,8 @@ static bool atlasc_make(const atlasc_args* args) {
     sx_irect final_rect = sx_irecti(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
     if (stbrp_pack_rects(&rp_ctx, rp_rects, num_sprites)) {
         for (int i = 0; i < num_sprites; i++) {
-            sx_irect sheet_rect =
+            atlasc__sprite* spr = &sprites[i];
+            sx_irect        sheet_rect =
                 sx_irectwh(rp_rects[i].x, rp_rects[i].y, rp_rects[i].w, rp_rects[i].h);
 
             // calculate the total size of output image
@@ -356,8 +364,7 @@ static bool atlasc_make(const atlasc_args* args) {
             sx_irect_add_point(&final_rect, sheet_rect.vmax);
 
             // shrink back rect and set the real sheet_rect for the sprite
-            sprites[i].sheet_rect =
-                sx_irect_expand(sheet_rect, sx_ivec2i(-args->border, -args->border));
+            spr->sheet_rect = sx_irect_expand(sheet_rect, sx_ivec2i(-args->border, -args->border));
         }
     }
 
@@ -379,8 +386,33 @@ static bool atlasc_make(const atlasc_args* args) {
         return false;
     }
 
+    // calculate UVs for sprite meshes
+    if (args->mesh) {
+        for (int i = 0; i < num_sprites; i++) {
+            atlasc__sprite* spr = &sprites[i];
+            // if sprite has mesh, calculate UVs for it
+            if (spr->pts && spr->num_points) {
+                const int padding = args->padding;
+                sx_ivec2 offset = spr->sprite_rect.vmin;
+                sx_ivec2  sheet_pos =
+                    sx_ivec2i(spr->sheet_rect.xmin + padding, spr->sheet_rect.ymin + padding);
+                sx_ivec2* uvs = sx_malloc(g_alloc, sizeof(sx_ivec2) * spr->num_points);
+                sx_assert(uvs);
+                for (int pi = 0; pi < spr->num_points; pi++) {
+                    sx_ivec2 pt = spr->pts[pi];
+                    uvs[pi] = sx_ivec2_add(sx_ivec2_sub(pt, offset), sheet_pos);
+                }
+
+                spr->uvs = uvs;
+            }    // generate uvs
+        }
+    }
+
+
     for (int i = 0; i < num_sprites; i++) {
         const atlasc__sprite* spr = &sprites[i];
+
+        // calculate UVs for sprite-meshes
 
         // remove padding and blit from src_image to dst
         sx_irect dstrc =
