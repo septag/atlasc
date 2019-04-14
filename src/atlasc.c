@@ -131,8 +131,105 @@ static void atlasc__blit(uint8_t* dst, int dst_x, int dst_y, int dst_pitch, cons
     }
 }
 
-static void atlasc__triangulate(atlasc__sprite* spr, const s2o_point* pts, int pt_count,
-                                int max_verts) {
+static inline sx_vec2 atlasc__itof2(const s2o_point p) {
+    return sx_vec2f((float)p.x, (float)p.y);
+}
+
+// modified version of:
+// https://github.com/anael-seghezzi/Maratis-Tiny-C-library/blob/master/include/m_raster.h
+static bool atlasc__test_line(const uint8_t* buffer, int w, int h, s2o_point p0, s2o_point p1) {
+    const uint8_t* data = buffer;
+
+    int x0 = p0.x;
+    int y0 = p0.y;
+    int x1 = p1.x;
+    int y1 = p1.y;
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy, e2;
+
+    while (1) {
+        if (x0 > -1 && y0 > -1 && x0 < w && y0 < h) {
+            const uint8_t* pixel = data + (y0 * w + x0);
+            if (*pixel)
+                return true;    // line intersects with image data
+        }
+
+        if (x0 == x1 && y0 == y1)
+            break;
+
+        e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+
+    return false;
+}
+
+// returns true if 'pts' buffer is changed
+static bool atlasc__offset_pt(s2o_point* pts, int num_pts, int pt_idx, float amount, int w, int h) {
+    s2o_point ipt = pts[pt_idx];
+    s2o_point _ipt = ipt;
+    sx_vec2   pt = atlasc__itof2(ipt);
+    sx_vec2   prev_pt =
+        (pt_idx > 0) ? atlasc__itof2(pts[pt_idx - 1]) : atlasc__itof2(pts[num_pts - 1]);
+    sx_vec2 next_pt =
+        (pt_idx + 1) < num_pts ? atlasc__itof2(pts[pt_idx + 1]) : atlasc__itof2(pts[0]);
+    sx_vec2 edge1 = sx_vec2_norm(sx_vec2_sub(prev_pt, pt));
+    sx_vec2 edge2 = sx_vec2_norm(sx_vec2_sub(next_pt, pt));
+
+    // calculate normal vector to move the point away from the polygon
+    sx_vec2 n;
+    sx_vec3 c = sx_vec3_cross(sx_vec3f(edge1.x, edge1.y, 0), sx_vec3f(edge2.x, edge2.y, 0));
+    if (sx_equal(c.z, 0.0f, 0.00001f)) {
+        n = sx_vec2_mulf(sx_vec2f(-edge1.y, edge1.x), amount);
+    } else {
+        // c.z < 0 -> point intersecting convex edges
+        // c.z > 0 -> point intersecting concave edges
+        float k = c.z < 0.0f ? -1.0f : 1.0f;
+        n = sx_vec2_mulf(sx_vec2_norm(sx_vec2_add(edge1, edge2)), k * amount);
+    }
+
+    pt = sx_vec2_add(pt, n);
+    ipt.x = (int)pt.x;
+    ipt.y = (int)pt.y;
+    ipt.x = sx_clamp(ipt.x, 0, w);
+    ipt.y = sx_clamp(ipt.y, 0, h);
+    pts[pt_idx] = ipt;
+    return (_ipt.x != ipt.x) || (_ipt.y != ipt.y);
+}
+
+static void atlasc__fix_outline_pts(const uint8_t* thresholded, int tw, int th, s2o_point* pts,
+                                    int num_pts) {
+    // NOTE: winding is assumed to be CW
+    const float offset_amount = 2.0f;
+
+    for (int i = 0; i < num_pts; i++) {
+        s2o_point pt = pts[i];
+        int next_i = (i + 1) < num_pts ? (i + 1) : 0;
+
+        sx_assert(!thresholded[pt.y * tw + pt.x]);    // point shouldn't be inside threshold
+
+        s2o_point next_pt = pts[next_i];
+        while (atlasc__test_line(thresholded, tw, th, pt, next_pt)) {
+            if (!atlasc__offset_pt(pts, num_pts, i, offset_amount, tw, th))
+                break;
+            atlasc__offset_pt(pts, num_pts, next_i, offset_amount, tw, th);
+            // refresh points for the new line intersection test
+            pt = pts[i];
+            next_pt = pts[next_i];
+        }
+    }
+}
+
+static void atlasc__make_mesh(atlasc__sprite* spr, const s2o_point* pts, int pt_count,
+                              int max_verts, const uint8_t* thresholded, int width, int height) {
     const float delta = 0.5f;
     const float threshold_start = 0.5f;
 
@@ -151,6 +248,9 @@ static void atlasc__triangulate(atlasc__sprite* spr, const s2o_point* pts, int p
         threshold += delta;
     } while (num_verts > max_verts);
     // printf("threshold: %.2f\n", threshold);
+
+    // fix any collisions with the actual image
+    atlasc__fix_outline_pts(thresholded, width, height, temp_pts, num_verts);    
 
     // triangulate
     del_point2d_t* dpts = sx_malloc(g_alloc, sizeof(del_point2d_t) * num_verts);
@@ -308,9 +408,13 @@ static bool atlasc_make(const atlasc_args* args) {
         uint8_t* thresholded = s2o_alpha_to_thresholded(alpha, spr->src_size.x, spr->src_size.y,
                                                         args->alpha_threshold);
         sx_free(g_alloc, alpha);
+
+        uint8_t* dialate_thres =
+            s2o_dilate_thresholded(thresholded, spr->src_size.x, spr->src_size.y);
+
         uint8_t* outlined =
-            s2o_thresholded_to_outlined(thresholded, spr->src_size.x, spr->src_size.y);
-        sx_free(g_alloc, thresholded);
+            s2o_thresholded_to_outlined(dialate_thres, spr->src_size.x, spr->src_size.y);
+        sx_free(g_alloc, dialate_thres);
 
         int        pt_count;
         s2o_point* pts =
@@ -325,10 +429,12 @@ static bool atlasc_make(const atlasc_args* args) {
 
         // generate mesh if set in arguments
         if (args->mesh) {
-            atlasc__triangulate(spr, pts, pt_count, args->max_verts_per_mesh);
+            atlasc__make_mesh(spr, pts, pt_count, args->max_verts_per_mesh, thresholded,
+                              spr->src_size.x, spr->src_size.y);
         }
 
         sx_free(g_alloc, pts);
+        sx_free(g_alloc, thresholded);
         spr->sprite_rect = sprite_rect;
     }
 
@@ -393,7 +499,7 @@ static bool atlasc_make(const atlasc_args* args) {
             // if sprite has mesh, calculate UVs for it
             if (spr->pts && spr->num_points) {
                 const int padding = args->padding;
-                sx_ivec2 offset = spr->sprite_rect.vmin;
+                sx_ivec2  offset = spr->sprite_rect.vmin;
                 sx_ivec2  sheet_pos =
                     sx_ivec2i(spr->sheet_rect.xmin + padding, spr->sheet_rect.ymin + padding);
                 sx_ivec2* uvs = sx_malloc(g_alloc, sizeof(sx_ivec2) * spr->num_points);
@@ -407,7 +513,6 @@ static bool atlasc_make(const atlasc_args* args) {
             }    // generate uvs
         }
     }
-
 
     for (int i = 0; i < num_sprites; i++) {
         const atlasc__sprite* spr = &sprites[i];

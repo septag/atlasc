@@ -1,1 +1,0 @@
--i test/handicraft_1.png -i test/handicraft_2.png -i test/handicraft_3.png -i test/handicraft_4.png -i test/handicraft_5.png -i test/handicraft_6.png -i test/handicraft_7.png -i test/handicraft_8.png -i test/handicraft_9.png -i test/handicraft_10.png

@@ -3,13 +3,15 @@
 ## Atlasc
 [@septag](https://twitter.com/septagh)  
 
-_atlasc_ is a command-line program that builds atlas textures from a bunch of input images.  
+_atlasc_ is a command-line program that builds atlas texture from a bunch of input images.  
 
-## Features
-- Light and fast.
+## Main Features
+- Cross-platform. Runs on linux/macOS/windows.
 - Outputs atlas description to human-readable _json_ format. Generated images are _png_.
-- Alpha trimming
-- Mesh sprites
+- Alpha trimming.
+- Mesh sprites.
+
+![drawsprite-wire](img/drawsprite-wire.png)
 
 ## Build
 It has built and tested on the following platforms:
@@ -18,10 +20,29 @@ It has built and tested on the following platforms:
 - __Linux__: Tested on ubuntu 16 with clang (6.0.0) and gcc (7.3.0). Package requirements:  
 - __MacOS__: Tested on MacOS High Sierra - AppleClang 9.1.0
 
-#### CMake options
-- **STATIC_LIB**: instead of command-line, generates static-library. see `include/atlasc` to review the API.
-
 ## Usage
+
+```
+atlasc -i image1.png -i image2.png -o output.json [extra args]
+```
+
+**Arguments**:
+
+```
+-h --help                           - Print help text
+-V --version                        - Print version
+-i --input=<Filepath>               - Input image file(s)
+-o --output=<Filepath>              - Output file
+-W --max-width(=Pixels)             - Maximum output image width (default:1024)
+-H --max-height(=Pixels)            - Maximum output image height (default:1024)
+-B --border(=Pixels)                - Border size for each sprite (default:2)
+-2 --pot                            - Make output image size power-of-two
+-P --padding(=Pixels)               - Set padding for each sprite (default:1)
+-m --mesh                           - Make sprite meshes
+-M --max-verts(=Number)             - Set maximum vertices for each generated sprite mesh (default:25)
+-A --alpha-threshold(=Number)       - Alpha threshold for cropping (0..255)
+```
+
 
 ## Open-Source libraries used
 - [sx](https://github.com/septag/sx): Portable base library
