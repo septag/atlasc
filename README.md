@@ -45,6 +45,9 @@ atlasc -i image1.png -i image2.png -o output.json [extra args]
 -A --alpha-threshold(=Number)       - Alpha threshold for cropping (0..255)
 ```
 
+## TODO
+- Support for islands. currently, there is a limitation that individual images should not have islands of pixels
+
 
 ## Open-Source libraries used
 - [sx](https://github.com/septag/sx): Portable base library
