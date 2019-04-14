@@ -7,6 +7,7 @@ _atlasc_ is a command-line program that builds atlas texture from a bunch of inp
 
 ## Main Features
 - Cross-platform. Runs on linux/macOS/windows.
+- No dependencies
 - Outputs atlas description to human-readable _json_ format. Generated images are _png_.
 - Alpha trimming.
 - Mesh sprites.
