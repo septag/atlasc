@@ -12,8 +12,7 @@ _atlasc_ is a command-line program that builds atlas texture from a bunch of inp
 - Alpha trimming.
 - Mesh sprites.
 
-![drawsprite-wire](img/drawsprite-wire.png)
-
+![drawsprite-wire](img/drawsprite-wire.png)  
 <sub><sup>screenshot taken from [rizz](https://github.com/septag/rizz) sprite example</sup></sub>
 
 ## Build
