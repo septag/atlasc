@@ -47,6 +47,7 @@ atlasc -i image1.png -i image2.png -o output.json [extra args]
 
 ## TODO
 - Support for islands. currently, there is a limitation that individual images should not have islands of pixels
+- Optimizations. It's a very early implementation and probably some parts of it has to be optimized 
 
 
 ## Open-Source libraries used
