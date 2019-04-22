@@ -43,6 +43,7 @@ atlasc -i image1.png -i image2.png -o output.json [extra args]
 -m --mesh                           - Make sprite meshes
 -M --max-verts(=Number)             - Set maximum vertices for each generated sprite mesh (default:25)
 -A --alpha-threshold(=Number)       - Alpha threshold for cropping (0..255)
+-s --scale(=Number)                 - Set scale for individual images (default:1.0)
 ```
 
 

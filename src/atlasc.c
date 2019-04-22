@@ -32,6 +32,12 @@ static const sx_alloc* g_alloc;
 #define STBIW_FREE(p) sx_free(g_alloc, p)
 #include "stb/stb_image_write.h"
 
+#define STBIR_MALLOC(size, context) sx_malloc(g_alloc, size)
+#define STBIR_FREE(ptr, context) sx_free(g_alloc, ptr)
+#define STBIR_ASSET(_b) sx_assert(_b)
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb/stb_image_resize.h"
+
 #define STB_RECT_PACK_IMPLEMENTATION
 #define STBRP_ASSERT sx_assert
 #define STBRP_STATIC
@@ -50,7 +56,7 @@ static const sx_alloc* g_alloc;
 #define S2O_MALLOC(sz) sx_malloc(g_alloc, sz)
 #include "sproutline/sproutline.h"
 
-#define VERSION 1000
+#define VERSION 1010
 
 typedef struct atlasc_args {
     int         alpha_threshold;
@@ -65,6 +71,7 @@ typedef struct atlasc_args {
     int         padding;
     int         mesh;
     int         max_verts_per_mesh;
+    float       scale;
 } atlasc_args;
 
 typedef struct {
@@ -212,7 +219,7 @@ static void atlasc__fix_outline_pts(const uint8_t* thresholded, int tw, int th, 
 
     for (int i = 0; i < num_pts; i++) {
         s2o_point pt = pts[i];
-        int next_i = (i + 1) < num_pts ? (i + 1) : 0;
+        int       next_i = (i + 1) < num_pts ? (i + 1) : 0;
 
         sx_assert(!thresholded[pt.y * tw + pt.x]);    // point shouldn't be inside threshold
 
@@ -250,7 +257,7 @@ static void atlasc__make_mesh(atlasc__sprite* spr, const s2o_point* pts, int pt_
     // printf("threshold: %.2f\n", threshold);
 
     // fix any collisions with the actual image
-    atlasc__fix_outline_pts(thresholded, width, height, temp_pts, num_verts);    
+    atlasc__fix_outline_pts(thresholded, width, height, temp_pts, num_verts);
 
     // triangulate
     del_point2d_t* dpts = sx_malloc(g_alloc, sizeof(del_point2d_t) * num_verts);
@@ -401,6 +408,32 @@ static bool atlasc_make(const atlasc_args* args) {
             atlasc__free_sprites(sprites, num_sprites);
             return false;
         }
+
+        // rescale
+        if (!sx_equal(args->scale, 1.0f, 0.0001f)) {
+            int      target_w = (int)((float)spr->src_size.x * args->scale);
+            int      target_h = (int)((float)spr->src_size.y * args->scale);
+            uint8_t* resized_pixels = sx_malloc(g_alloc, 4 * target_w * target_h);
+            if (!resized_pixels) {
+                sx_out_of_memory();
+                return false;
+            }
+
+            if (!stbir_resize_uint8(pixels, spr->src_size.x, spr->src_size.y, 4 * spr->src_size.x,
+                                    resized_pixels, target_w, target_h, 4 * target_w, 4)) {
+                sx_snprintf(g_error_str, sizeof(g_error_str), "could not resize image: %s",
+                            args->in_filepaths[i]);
+                atlasc__free_sprites(sprites, num_sprites);
+                return false;
+            }
+
+            stbi_image_free(pixels);
+
+            spr->src_size.x = target_w;
+            spr->src_size.y = target_h;
+            pixels = resized_pixels;
+        }
+
         spr->src_image = pixels;
 
         sx_irect sprite_rect;
@@ -555,7 +588,8 @@ int main(int argc, char* argv[]) {
                          .max_height = 2048,
                          .border = 2,
                          .padding = 1,
-                         .max_verts_per_mesh = 25 };
+                         .max_verts_per_mesh = 25,
+                         .scale = 1.0 };
 
     const sx_cmdline_opt cmd_opts[] = {
         { "help", 'h', SX_CMDLINE_OPTYPE_NO_ARG, 0x0, 'h', "Print help text", 0x0 },
@@ -577,6 +611,8 @@ int main(int argc, char* argv[]) {
           "Set maximum vertices for each generated sprite mesh (default:25)", "Number" },
         { "alpha-threshold", 'A', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'A',
           "Alpha threshold for cropping (0..255)", "Number" },
+        { "scale", 's', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 's',
+          "Set scale for individual images (default:1.0)", "Number" },
         SX_CMDLINE_OPT_END
     };
 
@@ -601,6 +637,7 @@ int main(int argc, char* argv[]) {
         case 'B': args.border = sx_toint(arg); break;
         case 'P': args.padding = sx_toint(arg); break;
         case 'M': args.max_verts_per_mesh = sx_toint(arg); break;
+        case 's': args.scale = sx_tofloat(arg); break;
         default:  break;
         }
     }
@@ -609,6 +646,11 @@ int main(int argc, char* argv[]) {
     if (version) {
         print_version();
         return 0;
+    }
+
+    if (args.scale < 0.0001f) {
+        puts("'scale' parameter is invalid");
+        return -1;
     }
 
     if (!args.in_filepaths) {
