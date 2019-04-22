@@ -11,6 +11,7 @@ _atlasc_ is a command-line program that builds atlas texture from a bunch of inp
 - Outputs atlas description to human-readable _json_ format. Generated images are _png_.
 - Alpha trimming.
 - Mesh sprites.
+- Scaling
 
 ![drawsprite-wire](img/drawsprite-wire.png)  
 <sub><sup>screenshot taken from [rizz](https://github.com/septag/rizz) sprite example</sup></sub>
