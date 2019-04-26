@@ -19,7 +19,14 @@ endif()
 
 add_subdirectory(3rdparty/sx)
 add_subdirectory(3rdparty/delaunay)
-add_executable(atlasc src/atlasc.c)
+
+if (NOT STATIC_LIB)
+    add_executable(atlasc src/atlasc.c)
+else()
+    add_library(atlasc STATIC src/atlasc)
+    target_compile_definitions(atlasc PRIVATE -DATLASC_STATIC_LIB)
+endif()
+
 target_link_libraries(atlasc PRIVATE sx delaunay)
 target_include_directories(atlasc PRIVATE 3rdparty)
 

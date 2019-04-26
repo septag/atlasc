@@ -53,7 +53,8 @@
         "glew.h": "c",
         "glext.h": "c",
         "sproutline.h": "c",
-        "stb_image_write.h": "c"
+        "stb_image_write.h": "c",
+        "sjson.h": "c"
     },
     "files.exclude": {
         "**/.git": true,

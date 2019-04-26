@@ -12,6 +12,7 @@ _atlasc_ is a command-line program that builds atlas texture from a bunch of inp
 - Alpha trimming.
 - Mesh sprites.
 - Scaling
+- Can build as static library
 
 ![drawsprite-wire](img/drawsprite-wire.png)  
 <sub><sup>screenshot taken from [rizz](https://github.com/septag/rizz) sprite example</sup></sub>
@@ -47,10 +48,24 @@ atlasc -i image1.png -i image2.png -o output.json [extra args]
 -s --scale(=Number)                 - Set scale for individual images (default:1.0)
 ```
 
+## Static Library
+To build _atlasc_ as static library instead of command-line tool, set `STATC_LIB` in cmake options.
+
+```
+cmake . -DSTATIC_LIB=1
+```
+
+There are three methods for creating atlases using the library:
+
+- Load from image files and output to image file: `atlasc_make`
+- Load from image files and return atlas in memory: `atlasc_make_inmem`
+- Load from images loaded in memory and return atlas in memory: `atlasc_make_inmem_fromem`
+  
+For more information, read the header file [atlasc.h](include/atlasc.h)
+
 ## TODO
 - Support for islands. currently, there is a limitation that individual images should not have islands of pixels
 - Optimizations. It's a very early implementation and probably some parts of it has to be optimized 
-
 
 ## Open-Source libraries used
 - [sx](https://github.com/septag/sx): Portable base library

@@ -371,7 +371,11 @@ bool sjson_check(const sjson_node* node, char errmsg[256]);
 
 #ifndef sjson_strcpy
 #	include <string.h>
-#   define sjson_strcpy(_a, _s, _b)      strcpy_s(_a, _s, _b)
+#   ifdef _MSC_VER
+#       define sjson_strcpy(_a, _s, _b)      strcpy_s(_a, _s, _b)
+#   else
+#       define sjson_strcpy(_a, _s, _b)      strcpy(_a, _b) 
+#   endif
 #endif
 
 #define sjson__align_mask(_value, _mask) ( ( (_value)+(_mask) ) & ( (~0)&(~(_mask) ) ) )
