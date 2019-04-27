@@ -27,7 +27,7 @@ It has built and tested on the following platforms:
 ## Usage
 
 ```
-atlasc -i image1.png -i image2.png -o output.json [extra args]
+atlasc image1.png image2.png -o output.json [extra args]
 ```
 
 **Arguments**:
