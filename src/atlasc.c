@@ -22,25 +22,28 @@
 
 #include "delaunay/delaunay.h"
 
-#include <stdio.h>
 #include <limits.h>
+#include <stdio.h>
 
 static const sx_alloc* g_alloc;
 typedef void* (*atlasc__malloc_cb)(size_t size, void* ctx);
-typedef void  (*atlasc__free_cb)(void* ptr, void* ctx);
+typedef void (*atlasc__free_cb)(void* ptr, void* ctx);
 typedef void* (*atlasc__realloc_cb)(void* ptr, size_t size, void* ctx);
 
-static void* atlasc__malloc(size_t size, void* ctx) {
+static void* atlasc__malloc(size_t size, void* ctx)
+{
     sx_unused(ctx);
     return sx_malloc(g_alloc, size);
 }
 
-static void atlasc__free(void* ptr, void* ctx) {
+static void atlasc__free(void* ptr, void* ctx)
+{
     sx_unused(ctx);
     sx_free(g_alloc, ptr);
 }
 
-static void* atlasc__realloc(void* ptr, size_t size, void* ctx) {
+static void* atlasc__realloc(void* ptr, size_t size, void* ctx)
+{
     sx_unused(ctx);
     return sx_realloc(g_alloc, ptr, size);
 }
@@ -93,19 +96,22 @@ static void* g_alloc_ctx;
 
 static char g_error_str[512];
 
-static void print_version() {
+static void print_version()
+{
     printf("atlasc v%d.%d.%d\n", VERSION / 1000, (VERSION % 1000) / 10, (VERSION % 10));
     puts("http://www.github.com/septag/atlasc");
 }
 
-static void print_help(sx_cmdline_context* ctx) {
+static void print_help(sx_cmdline_context* ctx)
+{
     char buffer[4096];
     print_version();
     puts("");
     puts(sx_cmdline_create_help_string(ctx, buffer, sizeof(buffer)));
 }
 
-static void atlasc__free_sprites(atlasc_sprite* sprites, int num_sprites) {
+static void atlasc__free_sprites(atlasc_sprite* sprites, int num_sprites)
+{
     for (int i = 0; i < num_sprites; i++) {
         if (sprites[i].src_image) {
             stbi_image_free(sprites[i].src_image);
@@ -127,13 +133,14 @@ static void atlasc__free_sprites(atlasc_sprite* sprites, int num_sprites) {
 }
 
 static void atlasc__blit(uint8_t* dst, int dst_x, int dst_y, int dst_pitch, const uint8_t* src,
-                         int src_x, int src_y, int src_w, int src_h, int src_pitch, int bpp) {
+                         int src_x, int src_y, int src_w, int src_h, int src_pitch, int bpp)
+{
     sx_assert(dst);
     sx_assert(src);
 
-    const int      pixel_sz = bpp / 8;
+    const int pixel_sz = bpp / 8;
     const uint8_t* src_ptr = src + src_y * src_pitch + src_x * pixel_sz;
-    uint8_t*       dst_ptr = dst + dst_y * dst_pitch + dst_x * pixel_sz;
+    uint8_t* dst_ptr = dst + dst_y * dst_pitch + dst_x * pixel_sz;
     for (int y = src_y; y < (src_y + src_h); y++) {
         sx_memcpy(dst_ptr, src_ptr, src_w * pixel_sz);
         src_ptr += src_pitch;
@@ -141,13 +148,15 @@ static void atlasc__blit(uint8_t* dst, int dst_x, int dst_y, int dst_pitch, cons
     }
 }
 
-static inline sx_vec2 atlasc__itof2(const s2o_point p) {
+static inline sx_vec2 atlasc__itof2(const s2o_point p)
+{
     return sx_vec2f((float)p.x, (float)p.y);
 }
 
 // modified version of:
 // https://github.com/anael-seghezzi/Maratis-Tiny-C-library/blob/master/include/m_raster.h
-static bool atlasc__test_line(const uint8_t* buffer, int w, int h, s2o_point p0, s2o_point p1) {
+static bool atlasc__test_line(const uint8_t* buffer, int w, int h, s2o_point p0, s2o_point p1)
+{
     const uint8_t* data = buffer;
 
     int x0 = p0.x;
@@ -183,11 +192,12 @@ static bool atlasc__test_line(const uint8_t* buffer, int w, int h, s2o_point p0,
 }
 
 // returns true if 'pts' buffer is changed
-static bool atlasc__offset_pt(s2o_point* pts, int num_pts, int pt_idx, float amount, int w, int h) {
+static bool atlasc__offset_pt(s2o_point* pts, int num_pts, int pt_idx, float amount, int w, int h)
+{
     s2o_point ipt = pts[pt_idx];
     s2o_point _ipt = ipt;
-    sx_vec2   pt = atlasc__itof2(ipt);
-    sx_vec2   prev_pt =
+    sx_vec2 pt = atlasc__itof2(ipt);
+    sx_vec2 prev_pt =
         (pt_idx > 0) ? atlasc__itof2(pts[pt_idx - 1]) : atlasc__itof2(pts[num_pts - 1]);
     sx_vec2 next_pt =
         (pt_idx + 1) < num_pts ? atlasc__itof2(pts[pt_idx + 1]) : atlasc__itof2(pts[0]);
@@ -216,15 +226,16 @@ static bool atlasc__offset_pt(s2o_point* pts, int num_pts, int pt_idx, float amo
 }
 
 static void atlasc__fix_outline_pts(const uint8_t* thresholded, int tw, int th, s2o_point* pts,
-                                    int num_pts) {
+                                    int num_pts)
+{
     // NOTE: winding is assumed to be CW
     const float offset_amount = 2.0f;
 
     for (int i = 0; i < num_pts; i++) {
         s2o_point pt = pts[i];
-        int       next_i = (i + 1) < num_pts ? (i + 1) : 0;
+        int next_i = (i + 1) < num_pts ? (i + 1) : 0;
 
-        sx_assert(!thresholded[pt.y * tw + pt.x]);    // point shouldn't be inside threshold
+        // sx_assert(!thresholded[pt.y * tw + pt.x]);    // point shouldn't be inside threshold
 
         s2o_point next_pt = pts[next_i];
         while (atlasc__test_line(thresholded, tw, th, pt, next_pt)) {
@@ -239,28 +250,33 @@ static void atlasc__fix_outline_pts(const uint8_t* thresholded, int tw, int th, 
 }
 
 static void atlasc__make_mesh(atlasc_sprite* spr, const s2o_point* pts, int pt_count, int max_verts,
-                              const uint8_t* thresholded, int width, int height) {
+                              const uint8_t* thresholded, int width, int height)
+{
     const float delta = 0.5f;
     const float threshold_start = 0.5f;
 
-    float      threshold = threshold_start;
-    int        num_verts;
+    float threshold = threshold_start;
+    int num_verts;
     s2o_point* temp_pts = atlasc__malloc(sizeof(s2o_point) * pt_count, g_alloc_ctx);
     if (!temp_pts) {
         sx_out_of_memory();
         return;
     }
 
-    do {
-        num_verts = pt_count;
-        sx_memcpy(temp_pts, pts, num_verts * sizeof(s2o_point));
-        s2o_distance_based_path_simplification(temp_pts, &num_verts, threshold);
-        threshold += delta;
-    } while (num_verts > max_verts);
-    // printf("threshold: %.2f\n", threshold);
+    if (width > 1 && height > 1) {
+        do {
+            num_verts = pt_count;
+            sx_memcpy(temp_pts, pts, num_verts * sizeof(s2o_point));
+            s2o_distance_based_path_simplification(temp_pts, &num_verts, threshold);
+            threshold += delta;
+        } while (num_verts > max_verts);
 
-    // fix any collisions with the actual image
-    atlasc__fix_outline_pts(thresholded, width, height, temp_pts, num_verts);
+        // fix any collisions with the actual image
+        atlasc__fix_outline_pts(thresholded, width, height, temp_pts, num_verts);
+    } else {
+        sx_memcpy(temp_pts, pts, sizeof(s2o_point)*pt_count);
+        num_verts = pt_count;
+    }
 
     // triangulate
     del_point2d_t* dpts = atlasc__malloc(sizeof(del_point2d_t) * num_verts, g_alloc_ctx);
@@ -302,8 +318,9 @@ static void atlasc__make_mesh(atlasc_sprite* spr, const s2o_point* pts, int pt_c
     atlasc__free(temp_pts, g_alloc_ctx);
 }
 
-static bool atlasc__save(const atlasc_args_files* args, const atlasc_sprite* sprites, int num_sprites,
-                         const uint8_t* dst, int dst_w, int dst_h) {
+static bool atlasc__save(const atlasc_args_files* args, const atlasc_sprite* sprites,
+                         int num_sprites, const uint8_t* dst, int dst_w, int dst_h)
+{
     char file_ext[32];
     char basename[256];
     char image_filepath[256];
@@ -331,10 +348,10 @@ static bool atlasc__save(const atlasc_args_files* args, const atlasc_sprite* spr
     sjson_put_int(jctx, jroot, "image_height", dst_h);
 
     sjson_node* jsprites = sjson_put_array(jctx, jroot, "sprites");
-    char        name[256];
+    char name[256];
     for (int i = 0; i < num_sprites; i++) {
         const atlasc_sprite* spr = &sprites[i];
-        sjson_node*          jsprite = sjson_mkobject(jctx);
+        sjson_node* jsprite = sjson_mkobject(jctx);
 
         sx_os_path_unixpath(name, sizeof(name), args->in_filepaths[i]);
         sjson_put_string(jctx, jsprite, "name", name);
@@ -383,13 +400,14 @@ static bool atlasc__save(const atlasc_args_files* args, const atlasc_sprite* spr
     return true;
 }
 
-PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_frommem* args) {
+PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_frommem* args)
+{
     sx_assert(args);
 
     if (!g_alloc)
         g_alloc = sx_alloc_malloc();
 
-    int            num_sprites = args->num_images;
+    int num_sprites = args->num_images;
     atlasc_sprite* sprites = atlasc__malloc(sizeof(atlasc_sprite) * num_sprites, g_alloc_ctx);
     if (!sprites) {
         sx_out_of_memory();
@@ -410,8 +428,8 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
 
         // rescale
         if (!sx_equal(cargs->scale, 1.0f, 0.0001f)) {
-            int      target_w = (int)((float)spr->src_size.x * cargs->scale);
-            int      target_h = (int)((float)spr->src_size.y * cargs->scale);
+            int target_w = (int)((float)spr->src_size.x * cargs->scale);
+            int target_h = (int)((float)spr->src_size.y * cargs->scale);
             uint8_t* resized_pixels = atlasc__malloc(4 * target_w * target_h, g_alloc_ctx);
             if (!resized_pixels) {
                 sx_out_of_memory();
@@ -420,7 +438,7 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
 
             if (!stbir_resize_uint8(pixels, spr->src_size.x, spr->src_size.y, 4 * spr->src_size.x,
                                     resized_pixels, target_w, target_h, 4 * target_w, 4)) {
-                sx_snprintf(g_error_str, sizeof(g_error_str), "could not resize image: #%d", i+1);
+                sx_snprintf(g_error_str, sizeof(g_error_str), "could not resize image: #%d", i + 1);
                 atlasc__free_sprites(sprites, num_sprites);
                 return NULL;
             }
@@ -435,27 +453,38 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
         spr->src_image = pixels;
 
         sx_irect sprite_rect;
+        int pt_count;
+        s2o_point* pts;
         uint8_t* alpha = s2o_rgba_to_alpha(spr->src_image, spr->src_size.x, spr->src_size.y);
         uint8_t* thresholded = s2o_alpha_to_thresholded(alpha, spr->src_size.x, spr->src_size.y,
                                                         cargs->alpha_threshold);
         atlasc__free(alpha, g_alloc_ctx);
 
-        uint8_t* dialate_thres =
-            s2o_dilate_thresholded(thresholded, spr->src_size.x, spr->src_size.y);
+        if (spr->src_size.x > 1 && spr->src_size.y > 1) {
+            uint8_t* dialate_thres =
+                s2o_dilate_thresholded(thresholded, spr->src_size.x, spr->src_size.y);
 
-        uint8_t* outlined =
-            s2o_thresholded_to_outlined(dialate_thres, spr->src_size.x, spr->src_size.y);
-        atlasc__free(dialate_thres, g_alloc_ctx);
+            uint8_t* outlined =
+                s2o_thresholded_to_outlined(dialate_thres, spr->src_size.x, spr->src_size.y);
+            atlasc__free(dialate_thres, g_alloc_ctx);
 
-        int        pt_count;
-        s2o_point* pts =
-            s2o_extract_outline_path(outlined, spr->src_size.x, spr->src_size.y, &pt_count, NULL);
-        atlasc__free(outlined, g_alloc_ctx);
+            pts = s2o_extract_outline_path(outlined, spr->src_size.x, spr->src_size.y, &pt_count,
+                                           NULL);
+            atlasc__free(outlined, g_alloc_ctx);
 
-        // calculate cropped rectangle
-        sprite_rect = sx_irecti(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
-        for (int k = 0; k < pt_count; k++) {
-            sx_irect_add_point(&sprite_rect, sx_ivec2i(pts[k].x, pts[k].y));
+            // calculate cropped rectangle
+            sprite_rect = sx_irecti(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
+            for (int k = 0; k < pt_count; k++) {
+                sx_irect_add_point(&sprite_rect, sx_ivec2i(pts[k].x, pts[k].y));
+            }
+        } else {
+            sprite_rect = sx_irecti(0, 0, spr->src_size.x, spr->src_size.y);
+            pt_count = 4;
+            pts = atlasc__malloc(sizeof(s2o_point)*pt_count, g_alloc_ctx);
+            pts[0] = (s2o_point) {0, 0};
+            pts[1] = (s2o_point) {spr->src_size.x, 0};
+            pts[2] = (s2o_point) {spr->src_size.x, spr->src_size.y};
+            pts[3] = (s2o_point) {0, spr->src_size.y};
         }
 
         // generate mesh if set in arguments
@@ -471,11 +500,11 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
 
     // pack sprites into a sheet
     stbrp_context rp_ctx;
-    int           max_width = cargs->max_width;
-    int           max_height = cargs->max_height;
-    int           num_rp_nodes = max_width + max_height;
-    stbrp_rect*   rp_rects = atlasc__malloc(num_sprites * sizeof(stbrp_rect), g_alloc_ctx);
-    stbrp_node*   rp_nodes = atlasc__malloc(num_rp_nodes * sizeof(stbrp_node), g_alloc_ctx);
+    int max_width = cargs->max_width;
+    int max_height = cargs->max_height;
+    int num_rp_nodes = max_width + max_height;
+    stbrp_rect* rp_rects = atlasc__malloc(num_sprites * sizeof(stbrp_rect), g_alloc_ctx);
+    stbrp_node* rp_nodes = atlasc__malloc(num_rp_nodes * sizeof(stbrp_node), g_alloc_ctx);
     if (!rp_rects || !rp_nodes) {
         sx_out_of_memory();
         return NULL;
@@ -484,7 +513,7 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
 
     for (int i = 0; i < num_sprites; i++) {
         sx_irect rc = sprites[i].sprite_rect;
-        int      rc_resize = (cargs->border + cargs->padding) * 2;
+        int rc_resize = (cargs->border + cargs->padding) * 2;
         rp_rects[i].w = (rc.xmax - rc.xmin) + rc_resize;
         rp_rects[i].h = (rc.ymax - rc.ymin) + rc_resize;
     }
@@ -493,7 +522,7 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
     if (stbrp_pack_rects(&rp_ctx, rp_rects, num_sprites)) {
         for (int i = 0; i < num_sprites; i++) {
             atlasc_sprite* spr = &sprites[i];
-            sx_irect       sheet_rect =
+            sx_irect sheet_rect =
                 sx_irectwh(rp_rects[i].x, rp_rects[i].y, rp_rects[i].w, rp_rects[i].h);
 
             // calculate the total size of output image
@@ -501,7 +530,8 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
             sx_irect_add_point(&final_rect, sheet_rect.vmax);
 
             // shrink back rect and set the real sheet_rect for the sprite
-            spr->sheet_rect = sx_irect_expand(sheet_rect, sx_ivec2i(-cargs->border, -cargs->border));
+            spr->sheet_rect =
+                sx_irect_expand(sheet_rect, sx_ivec2i(-cargs->border, -cargs->border));
         }
     }
 
@@ -530,8 +560,8 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
             // if sprite has mesh, calculate UVs for it
             if (spr->pts && spr->num_points) {
                 const int padding = cargs->padding;
-                sx_ivec2  offset = spr->sprite_rect.vmin;
-                sx_ivec2  sheet_pos =
+                sx_ivec2 offset = spr->sprite_rect.vmin;
+                sx_ivec2 sheet_pos =
                     sx_ivec2i(spr->sheet_rect.xmin + padding, spr->sheet_rect.ymin + padding);
                 sx_ivec2* uvs = atlasc__malloc(sizeof(sx_ivec2) * spr->num_points, g_alloc_ctx);
                 sx_assert(uvs);
@@ -576,12 +606,13 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem_frommem(const atlasc_args_fromm
 }
 
 
-PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem(const atlasc_args_files* args) {
+PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem(const atlasc_args_files* args)
+{
     sx_assert(args);
 
     if (!g_alloc)
         g_alloc = sx_alloc_malloc();
-    
+
     int num_images = args->num_files;
     atlasc_image_data* images = atlasc__malloc(sizeof(atlasc_image_data) * num_images, g_alloc_ctx);
     if (!images) {
@@ -591,7 +622,7 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem(const atlasc_args_files* args) 
     sx_memset(images, 0x0, sizeof(atlasc_image_data) * num_images);
 
     for (int i = 0; i < num_images; i++) {
-        int            comp;
+        int comp;
         if (!sx_os_path_isfile(args->in_filepaths[i])) {
             sx_snprintf(g_error_str, sizeof(g_error_str), "input image not found: %s",
                         args->in_filepaths[i]);
@@ -604,16 +635,13 @@ PUBLIC_DECL atlasc_atlas_data* atlasc_make_inmem(const atlasc_args_files* args) 
                         args->in_filepaths[i]);
             goto err_cleanup;
         }
-
     }
 
-    atlasc_args_frommem args2 = {
-        .common = args->common,
-        .images = images,
-        .num_images = num_images
-    };
+    atlasc_args_frommem args2 = { .common = args->common,
+                                  .images = images,
+                                  .num_images = num_images };
     atlasc_atlas_data* atlas = atlasc_make_inmem_frommem(&args2);
-    if (!atlas) 
+    if (!atlas)
         return NULL;
 
     return atlas;
@@ -625,10 +653,11 @@ err_cleanup:
         }
     }
     atlasc__free(images, g_alloc_ctx);
-    return NULL;    
+    return NULL;
 }
 
-PUBLIC_DECL void atlasc_free(atlasc_atlas_data* atlas) {
+PUBLIC_DECL void atlasc_free(atlasc_atlas_data* atlas)
+{
     sx_assert(atlas);
 
     if (atlas->sprites)
@@ -638,7 +667,8 @@ PUBLIC_DECL void atlasc_free(atlasc_atlas_data* atlas) {
     atlasc__free(atlas, g_alloc_ctx);
 }
 
-PUBLIC_DECL bool atlasc_make(const atlasc_args_files* args) {
+PUBLIC_DECL bool atlasc_make(const atlasc_args_files* args)
+{
     sx_assert(args);
     sx_assert(args->out_filepath);
 
@@ -654,7 +684,7 @@ PUBLIC_DECL bool atlasc_make(const atlasc_args_files* args) {
     sx_memset(images, 0x0, sizeof(atlasc_image_data) * num_images);
 
     for (int i = 0; i < num_images; i++) {
-        int            comp;
+        int comp;
         if (!sx_os_path_isfile(args->in_filepaths[i])) {
             sx_snprintf(g_error_str, sizeof(g_error_str), "input image not found: %s",
                         args->in_filepaths[i]);
@@ -667,19 +697,17 @@ PUBLIC_DECL bool atlasc_make(const atlasc_args_files* args) {
                         args->in_filepaths[i]);
             goto err_cleanup;
         }
-
     }
 
-    atlasc_args_frommem args2 = {
-        .common = args->common,
-        .images = images,
-        .num_images = num_images
-    };
+    atlasc_args_frommem args2 = { .common = args->common,
+                                  .images = images,
+                                  .num_images = num_images };
     atlasc_atlas_data* atlas = atlasc_make_inmem_frommem(&args2);
-    if (!atlas) 
+    if (!atlas)
         return false;
 
-    bool r = atlasc__save(args, atlas->sprites, atlas->num_sprites, atlas->atlas_image.pixels, atlas->atlas_image.width, atlas->atlas_image.height);
+    bool r = atlasc__save(args, atlas->sprites, atlas->num_sprites, atlas->atlas_image.pixels,
+                          atlas->atlas_image.width, atlas->atlas_image.height);
 
     atlasc_free(atlas);
     atlasc__free(images, g_alloc_ctx);
@@ -695,11 +723,14 @@ err_cleanup:
     return false;
 }
 
-PUBLIC_DECL const char* atlasc_error_string() {
+PUBLIC_DECL const char* atlasc_error_string()
+{
     return g_error_str;
 }
 
-PUBLIC_DECL void atlasc_set_alloc_callbacks(atlasc__malloc_cb malloc_fn, atlasc__free_cb free_fn, atlasc__realloc_cb realloc_fn, void* ctx) {
+PUBLIC_DECL void atlasc_set_alloc_callbacks(atlasc__malloc_cb malloc_fn, atlasc__free_cb free_fn,
+                                            atlasc__realloc_cb realloc_fn, void* ctx)
+{
     sx_assert(malloc_fn);
     sx_assert(free_fn);
     sx_assert(realloc_fn);
@@ -711,7 +742,8 @@ PUBLIC_DECL void atlasc_set_alloc_callbacks(atlasc__malloc_cb malloc_fn, atlasc_
 }
 
 #ifndef ATLASC_STATIC_LIB
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[])
+{
 #    ifdef _DEBUG
     const sx_alloc* alloc = sx_alloc_malloc_leak_detect();
 #    else
@@ -719,15 +751,14 @@ int main(int argc, char* argv[]) {
 #    endif
     g_alloc = alloc;
 
-    int         version = 0;
-    atlasc_args_files args = { .common = {
-             .alpha_threshold = 20,
-                         .max_width = 2048,
-                         .max_height = 2048,
-                         .border = 2,
-                         .padding = 1,
-                         .max_verts_per_mesh = 25,
-                         .scale = 1.0 }};
+    int version = 0;
+    atlasc_args_files args = { .common = { .alpha_threshold = 20,
+                                           .max_width = 2048,
+                                           .max_height = 2048,
+                                           .border = 2,
+                                           .padding = 1,
+                                           .max_verts_per_mesh = 25,
+                                           .scale = 1.0 } };
 
     const sx_cmdline_opt cmd_opts[] = {
         { "help", 'h', SX_CMDLINE_OPTYPE_NO_ARG, 0x0, 'h', "Print help text", 0x0 },
@@ -744,7 +775,8 @@ int main(int argc, char* argv[]) {
           "Make output image size power-of-two", NULL },
         { "padding", 'P', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'P',
           "Set padding for each sprite (default:1)", "Pixels" },
-        { "mesh", 'm', SX_CMDLINE_OPTYPE_FLAG_SET, &args.common.mesh, 1, "Make sprite meshes", NULL },
+        { "mesh", 'm', SX_CMDLINE_OPTYPE_FLAG_SET, &args.common.mesh, 1, "Make sprite meshes",
+          NULL },
         { "max-verts", 'M', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'M',
           "Set maximum vertices for each generated sprite mesh (default:25)", "Number" },
         { "alpha-threshold", 'A', SX_CMDLINE_OPTYPE_OPTIONAL, 0x0, 'A',
@@ -757,7 +789,7 @@ int main(int argc, char* argv[]) {
     sx_cmdline_context* cmd = sx_cmdline_create_context(alloc, argc, (const char**)argv, cmd_opts);
     sx_assert(cmd);
 
-    int         opt;
+    int opt;
     const char* arg;
 
     // clang-format off
