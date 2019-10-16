@@ -92,7 +92,7 @@ static void* g_alloc_ctx;
 #define S2O_MALLOC(sz) atlasc__malloc(sz, g_alloc_ctx)
 #include "sproutline/sproutline.h"
 
-#define VERSION 1020
+#define VERSION 1021
 
 static char g_error_str[512];
 
